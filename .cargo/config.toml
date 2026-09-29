@@ -1,0 +1,28 @@
+# Every build of this module, local or in CI, is the build the PowerShell
+# Gallery gets: the x86-64 baseline whatever CPU builds it, and the C
+# runtime linked in statically, so the native library loads on a machine
+# without the Visual C++ Redistributable. A RUSTFLAGS or
+# CARGO_ENCODED_RUSTFLAGS variable replaces these flags entirely, so
+# builds leave both unset; these take precedence over a machine's own
+# [build] rustflags.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "target-cpu=x86-64"]
+
+# The Arm64 build, which CI's windows-11-arm runner makes, links the C
+# runtime the same way.
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+# The x64 build compiles libzstd with LLVM's clang-cl, which has to be on
+# PATH. Under -fgnuc-version clang-cl defines __GNUC__, and libzstd then
+# compiles its BMI2 code paths beside the baseline ones and picks them at
+# run time on a CPU that has BMI2, while the binary stays the x86-64
+# baseline; cl.exe compiles no BMI2 path, and clang-cl without the flag
+# compiles them for the baseline. The zstd crate's build script reads
+# these through the cc crate, which takes a name ending in the target
+# ahead of CC and CFLAGS, and a variable of the same name already in the
+# environment wins over the value here. The Arm64 build keeps the
+# toolchain's own compiler.
+[env]
+CC_x86_64_pc_windows_msvc = "clang-cl"
+CFLAGS_x86_64_pc_windows_msvc = "/clang:-fgnuc-version=4.2.1"

@@ -1,0 +1,80 @@
+name: ci
+
+# Builds the Zstd module on an x64 and an Arm64 Windows runner from the
+# committed Cargo.lock, runs clippy with warnings denied, and runs cargo
+# pwrs test, which runs the Rust unit tests and then tests\Zstd.Tests.ps1
+# in PowerShell 7 and in Windows PowerShell 5.1. A Pester failure in
+# either host fails that runner's job, and each host's Pester totals are
+# in its log. Each runner uploads the module folder it built and tested;
+# the Gallery package takes its win-arm64 folder from the windows-11-arm
+# job's run of the release commit.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        # windows-11-arm builds and tests the module for Windows on Arm.
+        os: [windows-latest, windows-11-arm]
+    runs-on: ${{ matrix.os }}
+    env:
+      # .cargo/config.toml sets the static C runtime for both runners, and
+      # for x64 the x86-64 baseline and LLVM's clang-cl as the compiler of
+      # libzstd; RUSTFLAGS stays unset, since it would replace those flags.
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+          components: clippy
+      - name: Hosts, and Pester 6.2.0 for both of them
+        shell: pwsh
+        run: |
+          "pwsh $($PSVersionTable.PSVersion) on $([System.Runtime.InteropServices.RuntimeInformation]::FrameworkDescription)"
+          powershell -NoProfile -NonInteractive -Command '"Windows PowerShell " + $PSVersionTable.PSVersion'
+          rustc -V
+          # Windows ships Pester 3.4.0; the suite runs on Pester 6.2.0, and
+          # PWRS_PESTER_PATH makes both hosts load this copy.
+          $modules = Join-Path $env:RUNNER_TEMP 'modules'
+          $null = New-Item -ItemType Directory -Force -Path $modules
+          Save-PSResource -Name Pester -Version '[6.2.0]' -Repository PSGallery -TrustRepository -Path $modules
+          $pester = Join-Path $modules 'Pester\6.2.0\Pester.psd1'
+          if (-not (Test-Path $pester)) { throw "Pester 6.2.0 was not saved to $pester" }
+          "PWRS_PESTER_PATH=$pester" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: LLVM's clang-cl on PATH, which compiles libzstd for x64
+        if: runner.arch == 'X64'
+        shell: pwsh
+        run: |
+          $llvm = Join-Path $env:ProgramFiles 'LLVM\bin'
+          $clang = Join-Path $llvm 'clang-cl.exe'
+          if (-not (Test-Path $clang)) { throw "clang-cl.exe was not found in $llvm" }
+          & $clang --version
+          $llvm | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: cargo-pwrs 0.3.0, the release the PoWerRuSt dependency names
+        run: cargo install cargo-pwrs --version 0.3.0 --locked
+      - name: The committed Cargo.lock resolves every dependency
+        shell: pwsh
+        run: |
+          cargo metadata --locked --format-version 1 > $null
+          if ($LASTEXITCODE -ne 0) { throw "Cargo.lock does not resolve the manifest's dependencies (exit $LASTEXITCODE)" }
+      - name: Clippy, warnings denied
+        run: cargo clippy --locked --release --all-targets -- -D warnings
+      - name: cargo pwrs test (unit tests, then Pester in pwsh 7 and Windows PowerShell 5.1)
+        shell: pwsh
+        run: |
+          cargo pwrs test --release
+          if ($LASTEXITCODE -ne 0) { throw "cargo pwrs test exited with $LASTEXITCODE" }
+      - name: The build left Cargo.lock as committed
+        run: git diff --exit-code -- Cargo.lock
+      - name: Upload the module folder
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Zstd-${{ runner.arch == 'ARM64' && 'win-arm64' || 'win-x64' }}
+          path: target/pwrs/Zstd
+          if-no-files-found: error

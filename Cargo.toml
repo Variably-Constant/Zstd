@@ -1,0 +1,81 @@
+[package]
+name = "zstd-pwsh"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+# The module manifest takes Author from the first of `authors`,
+# Description from `description`, ProjectUri from `repository`, and
+# its tags from `keywords`. `cargo pwrs publish` refuses a module
+# that has not set its own authors and description.
+authors = ["Mark Newton"]
+description = """Zstandard (zstd) compression as PowerShell cmdlets, with libzstd 1.5.7, \
+the reference implementation, compiled into the module. Compress-Zstd compresses files, or \
+the bytes piped to it, each into one zstd frame that carries a content checksum, at levels \
+1 to 22 and on up to 256 worker threads. Expand-Zstd expands every frame of a file or of \
+piped bytes, and refuses data that is truncated, fails its checksum or names another \
+dictionary. New-ZstdDictionary trains a dictionary from sample files, which both other \
+cmdlets take, and -MaxMemory bounds everything a compression or an expansion commits. \
+Bound directly to Rust with PoWerRuSt (pwrs), Rust bindings for writing PowerShell binary \
+modules in the spirit of PyO3: the cmdlets are the library, not a wrapper over a command \
+line. Windows x64 and Arm64 in one module, on PowerShell 7.4 or later and Windows \
+PowerShell 5.1, with no Visual C++ Redistributable needed. Source and issues at \
+https://github.com/Variably-Constant/Zstd; the binding framework at \
+https://github.com/Variably-Constant/PWRS and https://crates.io/crates/PoWerRuSt."""
+keywords = ["powershell", "zstd", "zstandard", "compression", "Windows"]
+repository = "https://github.com/Variably-Constant/Zstd"
+
+# Everything else a module manifest carries, each under the manifest
+# key's own name in kebab case. A cargo manifest has no field for any
+# of them, and one left unset is written nowhere, so the manifest
+# carries no key it has no value for.
+[package.metadata.pwrs]
+company = "Variably Constant"
+copyright = "(c) 2026 Mark Newton"
+license-uri = "https://github.com/Variably-Constant/Zstd/blob/main/LICENSE"
+release-notes = "The first release: Compress-Zstd, Expand-Zstd and New-ZstdDictionary. What is in it: https://github.com/Variably-Constant/Zstd/blob/main/CHANGELOG.md"
+icon-uri = "https://raw.githubusercontent.com/Variably-Constant/PWRS/main/assets/PWRS.png"
+# prerelease = "beta1"                     # a gallery hides it from a plain install
+# require-license-acceptance = true
+# external-module-dependencies = ["Pester"]
+# powershell-version = "7.2"               # default 5.1, what the shells target
+# compatible-ps-editions = ["Core"]        # default both, one shell each
+# powershell-host-name = "ConsoleHost"
+# powershell-host-version = "5.1"
+# dotnet-framework-version = "4.7.2"       # Windows PowerShell reads these two;
+# clr-version = "4.0"                      # PowerShell Core ignores them
+# processor-architecture = "Amd64"
+# help-info-uri = "https://example.invalid/zstd-pwsh/help"
+# default-command-prefix = "Xy"            # inserted into every exported name
+# required-modules = ["Storage"]
+# required-assemblies = ["System.Xml.dll"]
+# scripts-to-process = ["init.ps1"]
+# types-to-process = ["Zstd.Types.ps1xml"]
+# nested-modules = ["Extra.psm1"]
+# dsc-resources-to-export = ["YourResource"]
+# module-list = ["Zstd"]
+# file-list = ["readme.md"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# PoWerRuSt from crates.io, 0.3.0 or a later compatible release, which
+# Cargo.lock pins. Build with cargo-pwrs of the same release.
+pwrs = { package = "PoWerRuSt", version = "0.3.0" }
+# The crate's default features without `legacy`, libzstd's decoders for
+# the formats before zstd 1.0; zdict_builder is the dictionary trainer
+# New-ZstdDictionary uses, and zstdmt builds libzstd with the worker
+# threads -Threads uses. experimental is libzstd's static-linking-only
+# API, for the memory estimates -MaxMemory is checked against and the
+# stable buffers that let libzstd work in memory-mapped files.
+zstd = { version = "0.14.0", default-features = false, features = ["arrays", "zdict_builder", "zstdmt", "experimental"] }
+# Memory-mapped files for file-to-file compression and expansion.
+memmap2 = "0.9.11"
+
+# Whole-program LTO and one codegen unit so pwrs inlines into the
+# cmdlet body. Keep panic = "unwind": pwrs catches panics at the
+# boundary and reports them as errors instead of aborting the host.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
